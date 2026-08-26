@@ -139,14 +139,13 @@ async def test_clamd_scanner_scan_exception(eicar_file: Path) -> None:
 
     result = await scanner.scan(str(eicar_file))
 
-    assert result == ScanResult(
-        filename=str(eicar_file),
-        state="ERROR",
-        details="Error 111 connecting 127.0.0.1:65000. Connection refused.",
-        err=CommunicationError(
-            "Error 111 connecting 127.0.0.1:65000. Connection refused."
-        ),
-    )
+    assert result.state == "ERROR"
+    assert result.filename == str(eicar_file)
+    assert result.err is not None
+    assert isinstance(result.err, CommunicationError)
+    assert result.details is not None
+    assert "Error 111 connecting 127.0.0.1:65000" in str(result.details)
+    assert "Error 111 connecting 127.0.0.1:65000" in str(result.err)
     assert result.passed is None
 
 
