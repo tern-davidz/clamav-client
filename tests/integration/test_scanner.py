@@ -27,8 +27,8 @@ def test_get_scanner_raises_value_error() -> None:
 
 
 @pytest.mark.slow
-def test_clamscan_scanner_info(clamscan_scanner: Scanner) -> None:
-    info = clamscan_scanner.info()
+async def test_clamscan_scanner_info(clamscan_scanner: Scanner) -> None:
+    info = await clamscan_scanner.info()
 
     assert isinstance(clamscan_scanner, ClamscanScanner)
     assert info.name == "ClamAV (clamscan)"
@@ -36,8 +36,10 @@ def test_clamscan_scanner_info(clamscan_scanner: Scanner) -> None:
 
 
 @pytest.mark.slow
-def test_clamscan_scanner_scan_ok(clamscan_scanner: Scanner, clean_file: Path) -> None:
-    result = clamscan_scanner.scan(str(clean_file))
+async def test_clamscan_scanner_scan_ok(
+    clamscan_scanner: Scanner, clean_file: Path
+) -> None:
+    result = await clamscan_scanner.scan(str(clean_file))
 
     assert result == ScanResult(
         filename=str(clean_file),
@@ -48,12 +50,12 @@ def test_clamscan_scanner_scan_ok(clamscan_scanner: Scanner, clean_file: Path) -
 
 
 @pytest.mark.slow
-def test_clamscan_scanner_scan_found(
+async def test_clamscan_scanner_scan_found(
     clamscan_scanner: Scanner,
     eicar_file: Path,
     assert_eicar_signature: EicarSignatureAsserter,
 ) -> None:
-    result = clamscan_scanner.scan(str(eicar_file))
+    result = await clamscan_scanner.scan(str(eicar_file))
 
     assert result.filename == str(eicar_file)
     assert result.state == "FOUND"
@@ -62,8 +64,8 @@ def test_clamscan_scanner_scan_found(
 
 
 @pytest.mark.slow
-def test_clamscan_scanner_scan_error(clamscan_scanner: Scanner) -> None:
-    result = clamscan_scanner.scan("/tmp/notfound")
+async def test_clamscan_scanner_scan_error(clamscan_scanner: Scanner) -> None:
+    result = await clamscan_scanner.scan("/tmp/notfound")
 
     assert result == ScanResult(
         filename="/tmp/notfound",
@@ -73,9 +75,9 @@ def test_clamscan_scanner_scan_error(clamscan_scanner: Scanner) -> None:
     )
 
 
-def test_clamd_scanner_info(clamd_scanner: Scanner) -> None:
-    info = clamd_scanner.info()
-    info_2 = clamd_scanner.info()  # Activates caching code path.
+async def test_clamd_scanner_info(clamd_scanner: Scanner) -> None:
+    info = await clamd_scanner.info()
+    info_2 = await clamd_scanner.info()  # Activates caching code path.
 
     assert isinstance(clamd_scanner, ClamdScanner)
     assert info.name == "ClamAV (clamd)"
@@ -84,8 +86,8 @@ def test_clamd_scanner_info(clamd_scanner: Scanner) -> None:
     assert info == info_2
 
 
-def test_clamd_scanner_scan_ok(clamd_scanner: Scanner, clean_file: Path) -> None:
-    result = clamd_scanner.scan(str(clean_file))
+async def test_clamd_scanner_scan_ok(clamd_scanner: Scanner, clean_file: Path) -> None:
+    result = await clamd_scanner.scan(str(clean_file))
 
     assert result == ScanResult(
         filename=str(clean_file),
@@ -95,12 +97,12 @@ def test_clamd_scanner_scan_ok(clamd_scanner: Scanner, clean_file: Path) -> None
     )
 
 
-def test_clamd_scanner_scan_found(
+async def test_clamd_scanner_scan_found(
     clamd_scanner: Scanner,
     eicar_file: Path,
     assert_eicar_signature: EicarSignatureAsserter,
 ) -> None:
-    result = clamd_scanner.scan(str(eicar_file))
+    result = await clamd_scanner.scan(str(eicar_file))
 
     assert result.filename == str(eicar_file)
     assert result.state == "FOUND"
@@ -108,7 +110,7 @@ def test_clamd_scanner_scan_found(
     assert result.err is None
 
 
-def test_clamd_scanner_scan_error(
+async def test_clamd_scanner_scan_error(
     ci: bool, clamd_scanner: Scanner, tmp_path: Path
 ) -> None:
     if ci:
@@ -117,7 +119,7 @@ def test_clamd_scanner_scan_error(
     f = tmp_path / "file"
     f.write_bytes(b"")
 
-    result = clamd_scanner.scan(str(f))
+    result = await clamd_scanner.scan(str(f))
 
     assert result == ScanResult(
         filename=str(f),
@@ -127,7 +129,7 @@ def test_clamd_scanner_scan_error(
     )
 
 
-def test_clamd_scanner_scan_exception(eicar_file: Path) -> None:
+async def test_clamd_scanner_scan_exception(eicar_file: Path) -> None:
     scanner = get_scanner(
         {
             "backend": "clamd",
@@ -135,7 +137,7 @@ def test_clamd_scanner_scan_exception(eicar_file: Path) -> None:
         }
     )
 
-    result = scanner.scan(str(eicar_file))
+    result = await scanner.scan(str(eicar_file))
 
     assert result == ScanResult(
         filename=str(eicar_file),
@@ -148,12 +150,12 @@ def test_clamd_scanner_scan_exception(eicar_file: Path) -> None:
     assert result.passed is None
 
 
-def test_clamd_scanner_instream_over_unix(
+async def test_clamd_scanner_instream_over_unix(
     clamd_scanner_with_streaming: Scanner,
     eicar_file: Path,
     assert_eicar_signature: EicarSignatureAsserter,
 ) -> None:
-    result = clamd_scanner_with_streaming.scan(str(eicar_file))
+    result = await clamd_scanner_with_streaming.scan(str(eicar_file))
 
     assert result.filename == str(eicar_file)
     assert result.state == "FOUND"
@@ -161,12 +163,12 @@ def test_clamd_scanner_instream_over_unix(
     assert result.err is None
 
 
-def test_clamd_scanner_instream_over_tcp(
+async def test_clamd_scanner_instream_over_tcp(
     clamd_scanner_over_tcp: Scanner,
     eicar_file: Path,
     assert_eicar_signature: EicarSignatureAsserter,
 ) -> None:
-    result = clamd_scanner_over_tcp.scan(str(eicar_file))
+    result = await clamd_scanner_over_tcp.scan(str(eicar_file))
 
     assert result.filename == str(eicar_file)
     assert result.state == "FOUND"

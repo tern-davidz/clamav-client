@@ -21,8 +21,8 @@ from clamav_client.scanner import ScanResult
         ),
     },
 )
-def test_clamdscanner_missing_result_entry(mock: mock.Mock) -> None:
-    result = ClamdScanner({}).scan("/tmp/file")
+async def test_clamdscanner_missing_result_entry(mock: mock.Mock) -> None:
+    result = await ClamdScanner({}).scan("/tmp/file")
 
     assert result == ScanResult(
         filename="/tmp/file", state=None, details=None, err=None

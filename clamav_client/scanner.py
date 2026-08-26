@@ -1,12 +1,12 @@
 """A general-purpose scanner compatible with both ``clamd`` and ``clamscan``."""
 
 import abc
+import asyncio
 import re
 from dataclasses import dataclass
 from errno import EPIPE
 from subprocess import STDOUT
 from subprocess import CalledProcessError
-from subprocess import check_output
 from typing import Any
 from typing import Literal
 from typing import Optional
@@ -105,21 +105,21 @@ class Scanner(abc.ABC):
     _program: ProgramName
 
     @abc.abstractmethod
-    def scan(self, filename: str) -> ScanResult:
+    async def scan(self, filename: str) -> ScanResult:
         """Scan a file."""
 
-    def info(self) -> ScannerInfo:
+    async def info(self) -> ScannerInfo:
         """Fetch information of the current backend."""
         if not hasattr(self, "_info"):
             self._info = {}
         try:
             return self._info[self._program]
         except KeyError:
-            self._info[self._program] = self._parse_version(self._get_version())
+            self._info[self._program] = self._parse_version(await self._get_version())
             return self._info[self._program]
 
     @abc.abstractmethod
-    def _get_version(self) -> str:
+    async def _get_version(self) -> str:
         """Return the program version details."""
 
     def _parse_version(self, version: str) -> ScannerInfo:
@@ -162,13 +162,13 @@ class ClamdScanner(Scanner):
         else:
             raise ValueError(f"Invalid address format: {self.address}")
 
-    def scan(self, filename: str) -> ScanResult:
+    async def scan(self, filename: str) -> ScanResult:
         result = ScanResult(filename=filename, state=None, details=None, err=None)
         method_name = "_pass_by_stream" if self.stream else "_pass_by_reference"
         report_key = "stream" if self.stream else filename
         try:
             method = getattr(self, method_name)
-            report = method(filename)
+            report = await method(filename)
         except Exception as err:
             return result.update(state="ERROR", details=str(err), err=err)
         file_report = report.get(report_key)
@@ -177,14 +177,15 @@ class ClamdScanner(Scanner):
         state, details = file_report
         return result.update(state, details)
 
-    def _get_version(self) -> str:
-        return self.client.version()
+    async def _get_version(self) -> str:
+        return await self.client.version()
 
-    def _pass_by_reference(self, filename: str) -> ScanResults:
-        return self.client.scan(filename)
+    async def _pass_by_reference(self, filename: str) -> ScanResults:
+        return await self.client.scan(filename)
 
-    def _pass_by_stream(self, filename: str) -> ScanResults:
-        return self.client.instream(open(filename, "rb"))
+    async def _pass_by_stream(self, filename: str) -> ScanResults:
+        with open(filename, "rb") as stream:
+            return await self.client.instream(stream)
 
 
 class ClamscanScannerConfig(TypedDict, total=False):
@@ -203,15 +204,23 @@ class ClamscanScanner(Scanner):
         self.max_file_size = config.get("max_file_size", float(2000))
         self.max_scan_size = config.get("max_scan_size", float(2000))
 
-    def _call(self, *args: str) -> bytes:
-        return check_output((self._command,) + args, stderr=STDOUT)
+    async def _call(self, *args: str) -> bytes:
+        process = await asyncio.create_subprocess_exec(
+            self._command, *args, stdout=asyncio.subprocess.PIPE, stderr=STDOUT
+        )
+        output, _ = await process.communicate()
+        if process.returncode:
+            raise CalledProcessError(
+                process.returncode, (self._command,) + args, output
+            )
+        return output
 
-    def scan(self, filename: str) -> ScanResult:
+    async def scan(self, filename: str) -> ScanResult:
         result = ScanResult(filename=filename, state=None, details=None, err=None)
         max_file_size = f"--max-filesize={int(self.max_file_size)}M"
         max_scan_size = f"--max-scansize={int(self.max_scan_size)}M"
         try:
-            self._call(max_file_size, max_scan_size, "--no-summary", filename)
+            await self._call(max_file_size, max_scan_size, "--no-summary", filename)
         except CalledProcessError as err:
             if err.returncode == 1:
                 result.update("FOUND", self._parse_found(err.output))
@@ -221,8 +230,8 @@ class ClamscanScanner(Scanner):
             result.update("OK", None)
         return result
 
-    def _get_version(self) -> str:
-        return self._call("-V").decode("utf-8")
+    async def _get_version(self) -> str:
+        return (await self._call("-V")).decode("utf-8")
 
     def _parse_error(self, output: Any) -> Optional[str]:
         if output is None or not isinstance(output, bytes):

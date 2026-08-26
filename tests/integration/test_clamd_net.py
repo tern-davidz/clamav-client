@@ -11,47 +11,47 @@ from clamav_client.clamd import CommunicationError
 EicarSignatureAsserter = Callable[[Optional[str]], None]
 
 
-def test_cannot_connect() -> None:
+async def test_cannot_connect() -> None:
     with pytest.raises(CommunicationError):
-        ClamdNetworkSocket("127.0.0.1", 999).ping()
+        await ClamdNetworkSocket("127.0.0.1", 999).ping()
 
 
-def test_ping(clamd_net_client: ClamdNetworkSocket) -> None:
-    clamd_net_client.ping()
+async def test_ping(clamd_net_client: ClamdNetworkSocket) -> None:
+    await clamd_net_client.ping()
 
 
-def test_version(clamd_net_client: ClamdNetworkSocket) -> None:
-    assert clamd_net_client.version().startswith("ClamAV")
+async def test_version(clamd_net_client: ClamdNetworkSocket) -> None:
+    assert (await clamd_net_client.version()).startswith("ClamAV")
 
 
-def test_reload(clamd_net_client: ClamdNetworkSocket) -> None:
-    assert clamd_net_client.reload() == "RELOADING"
+async def test_reload(clamd_net_client: ClamdNetworkSocket) -> None:
+    assert await clamd_net_client.reload() == "RELOADING"
 
 
-def test_stats(clamd_net_client: ClamdNetworkSocket) -> None:
-    assert "END" in clamd_net_client.stats()
+async def test_stats(clamd_net_client: ClamdNetworkSocket) -> None:
+    assert "END" in await clamd_net_client.stats()
 
 
-def test_instream_found(
+async def test_instream_found(
     clamd_net_client: ClamdNetworkSocket,
     eicar: bytes,
     assert_eicar_signature: EicarSignatureAsserter,
 ) -> None:
-    result = clamd_net_client.instream(BytesIO(eicar))
+    result = await clamd_net_client.instream(BytesIO(eicar))
     assert "stream" in result
     status, signature = result["stream"]
     assert status == "FOUND"
     assert_eicar_signature(signature)
 
 
-def test_instream_ok(clamd_net_client: ClamdNetworkSocket) -> None:
-    assert clamd_net_client.instream(BytesIO(b"foo")) == {"stream": ("OK", None)}
+async def test_instream_ok(clamd_net_client: ClamdNetworkSocket) -> None:
+    assert await clamd_net_client.instream(BytesIO(b"foo")) == {"stream": ("OK", None)}
 
 
 @pytest.mark.xfail
-def test_instream_exceeded(
+async def test_instream_exceeded(
     clamd_net_client: ClamdNetworkSocket, really_big_file: BytesIO
 ) -> None:
     """TODO: this is raising BrokenPipeError instead of BufferTooLongError."""
     with pytest.raises(BufferTooLongError):
-        clamd_net_client.instream(really_big_file)
+        await clamd_net_client.instream(really_big_file)
