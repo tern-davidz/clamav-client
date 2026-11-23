@@ -11,6 +11,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+
 from clamav_client.clamd import ClamdNetworkSocket
 from clamav_client.clamd import ClamdUnixSocket
 from clamav_client.clamd import ScanResults
