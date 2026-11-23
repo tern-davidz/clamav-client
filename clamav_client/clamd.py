@@ -60,16 +60,16 @@ class ClamdNetworkSocket:
         self.host = host
         self.port = port
         self.timeout = timeout
-        self.reader: Optional[asyncio.StreamReader] = None
-        self.writer: Optional[asyncio.StreamWriter] = None
 
-    async def _init_socket(self) -> None:
+    async def _init_socket(
+        self,
+    ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         """
         internal use only
         """
         try:
             connection = asyncio.open_connection(self.host, self.port)
-            self.reader, self.writer = await self._with_timeout(connection)
+            return await self._with_timeout(connection)
         except (OSError, asyncio.TimeoutError) as err:
             raise CommunicationError(self._error_message(err)) from err
 
@@ -104,11 +104,11 @@ class ClamdNetworkSocket:
         May raise:
           - ConnectionError: in case of communication problem
         """
+        _, writer = await self._init_socket()
         try:
-            await self._init_socket()
-            await self._send_command("SHUTDOWN")
+            await self._send_command(writer, "SHUTDOWN")
         finally:
-            await self._close_socket()
+            await self._close_socket(writer)
 
     async def scan(self, file: str) -> ScanResults:
         return await self._file_system_scan("SCAN", file)
@@ -123,10 +123,10 @@ class ClamdNetworkSocket:
         """
         Send a command to the clamav server, and return the reply.
         """
-        await self._init_socket()
+        reader, writer = await self._init_socket()
         try:
-            await self._send_command(command)
-            response = await self._recv_response()
+            await self._send_command(writer, command)
+            response = await self._recv_response(reader)
             if response is None:
                 raise ResponseError()
             error = response.rsplit("ERROR", 1)
@@ -135,7 +135,7 @@ class ClamdNetworkSocket:
             else:
                 return error[0]
         finally:
-            await self._close_socket()
+            await self._close_socket(writer)
 
     async def _file_system_scan(self, command: str, file: str) -> ScanResults:
         """
@@ -151,11 +151,11 @@ class ClamdNetworkSocket:
         May raise:
           - ConnectionError: in case of communication problem
         """
+        reader, writer = await self._init_socket()
         try:
-            await self._init_socket()
-            await self._send_command(command, file)
+            await self._send_command(writer, command, file)
             dr = {}
-            response = await self._recv_response_multiline()
+            response = await self._recv_response_multiline(reader)
             if response is None:
                 raise ResponseError()
             for result in response.split("\n"):
@@ -164,7 +164,7 @@ class ClamdNetworkSocket:
                     dr[filename] = (status, reason)
             return dr
         finally:
-            await self._close_socket()
+            await self._close_socket(writer)
 
     async def instream(self, buff: BinaryIO) -> ScanResults:
         """
@@ -179,20 +179,19 @@ class ClamdNetworkSocket:
           - BufferTooLongError: if the buffer size exceeds clamd limits
           - ConnectionError: in case of communication problem
         """
+        reader, writer = await self._init_socket()
         try:
-            await self._init_socket()
-            await self._send_command("INSTREAM")
-            assert self.writer is not None
+            await self._send_command(writer, "INSTREAM")
             max_chunk_size = 1024  # MUST be < StreamMaxLength in /etc/clamav/clamd.conf
             chunk = buff.read(max_chunk_size)
             while chunk:
                 size = struct.pack(b"!L", len(chunk))
-                self.writer.write(size + chunk)
-                await self.writer.drain()
+                writer.write(size + chunk)
+                await writer.drain()
                 chunk = buff.read(max_chunk_size)
-            self.writer.write(struct.pack(b"!L", 0))
-            await self.writer.drain()
-            result = await self._recv_response()
+            writer.write(struct.pack(b"!L", 0))
+            await writer.drain()
+            result = await self._recv_response(reader)
             if len(result) > 0:
                 if result == "INSTREAM size limit exceeded. ERROR":
                     raise BufferTooLongError(result)
@@ -201,7 +200,7 @@ class ClamdNetworkSocket:
             else:
                 return {}
         finally:
-            await self._close_socket()
+            await self._close_socket(writer)
 
     async def stats(self) -> str:
         """
@@ -212,14 +211,16 @@ class ClamdNetworkSocket:
         May raise:
           - ConnectionError: in case of communication problem
         """
-        await self._init_socket()
+        reader, writer = await self._init_socket()
         try:
-            await self._send_command("STATS")
-            return await self._recv_response_multiline()
+            await self._send_command(writer, "STATS")
+            return await self._recv_response_multiline(reader)
         finally:
-            await self._close_socket()
+            await self._close_socket(writer)
 
-    async def _send_command(self, cmd: str, *args: str) -> None:
+    async def _send_command(
+        self, writer: asyncio.StreamWriter, cmd: str, *args: str
+    ) -> None:
         """
         `man clamd` recommends to prefix commands with z, but we will use \n
         terminated strings, as python<->clamd has some problems with \0x00
@@ -228,43 +229,39 @@ class ClamdNetworkSocket:
         if args:
             concat_args = " " + " ".join(args)
         send = f"n{cmd}{concat_args}\n".encode()
-        assert self.writer is not None
-        self.writer.write(send)
-        await self.writer.drain()
+        writer.write(send)
+        await writer.drain()
 
-    async def _recv_response(self) -> str:
+    async def _recv_response(self, reader: asyncio.StreamReader) -> str:
         """
         receive line from clamd
         """
         try:
-            assert self.reader is not None
-            response = await self._with_timeout(self.reader.readline())
+            response = await self._with_timeout(reader.readline())
             return response.decode("utf-8").strip()
         except (OSError, asyncio.TimeoutError) as err:
             raise CommunicationError(
                 f"Error while reading from socket: {err.args}"
             ) from err
 
-    async def _recv_response_multiline(self) -> str:
+    async def _recv_response_multiline(self, reader: asyncio.StreamReader) -> str:
         """
         receive multiple line response from clamd and strip all whitespace characters
         """
         try:
-            assert self.reader is not None
-            response = await self._with_timeout(self.reader.read())
+            response = await self._with_timeout(reader.read())
             return response.decode("utf-8")
         except (OSError, asyncio.TimeoutError) as err:
             raise CommunicationError(
                 f"Error while reading from socket: {err.args}"
             ) from err
 
-    async def _close_socket(self) -> None:
+    async def _close_socket(self, writer: asyncio.StreamWriter) -> None:
         """
         close clamd socket
         """
-        if self.writer is not None:
-            self.writer.close()
-            await self.writer.wait_closed()
+        writer.close()
+        await writer.wait_closed()
 
     def _parse_response(self, msg: str) -> tuple[Union[str, Any], ...]:
         """
@@ -296,16 +293,16 @@ class ClamdUnixSocket(ClamdNetworkSocket):
             path = path[len(scheme) :]
         self.unix_socket = path
         self.timeout = timeout
-        self.reader: Optional[asyncio.StreamReader] = None
-        self.writer: Optional[asyncio.StreamWriter] = None
 
-    async def _init_socket(self) -> None:
+    async def _init_socket(
+        self,
+    ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         """
         internal use only
         """
         try:
             connection = asyncio.open_unix_connection(self.unix_socket)
-            self.reader, self.writer = await self._with_timeout(connection)
+            return await self._with_timeout(connection)
         except (OSError, asyncio.TimeoutError) as err:
             raise CommunicationError(self._error_message(err)) from err
 
